@@ -23,8 +23,11 @@ project (PFLOGGER
   VERSION 1.4.2
   LANGUAGES Fortran)
 
+#set (CMAKE_MODULE_PATH
+#   ${CMAKE_SOURCE_DIR}/cmake
+#)
 set (CMAKE_MODULE_PATH
-   ${CMAKE_SOURCE_DIR}/cmake
+   ${PROJECT_SOURCE_DIR}/cmake
 )
 
 include (PreventInSourceBuild)
