@@ -23,10 +23,9 @@ project (PFLOGGER
   VERSION 1.4.2
   LANGUAGES Fortran)
 
-#set (CMAKE_MODULE_PATH
-#   ${CMAKE_SOURCE_DIR}/cmake
-#)
 set (CMAKE_MODULE_PATH
+   # GCHP: Use project source dir rather than cmake source dir
+   #${CMAKE_SOURCE_DIR}/cmake
    ${PROJECT_SOURCE_DIR}/cmake
 )
 
@@ -36,9 +35,10 @@ include (DefinePlatformDefaults)
 
 set (CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-###find_package (GFTL REQUIRED)
-###find_package (GFTL_SHARED REQUIRED)
-###find_package (YAFYAML REQUIRED)
+# GCHP: Use IS_REQUIRED_ARG set higher up in project
+#find_package (GFTL REQUIRED)
+#find_package (GFTL_SHARED REQUIRED)
+#find_package (YAFYAML REQUIRED)
 find_package(GFTL ${GFTL_IS_REQUIRED_ARG} CONFIG)
 find_package(GFTL_SHARED ${GFTL_SHARED_IS_REQUIRED_ARG} CONFIG)
 find_package(YAFYAML ${YAFYAML_IS_REQUIRED_ARG} CONFIG)
