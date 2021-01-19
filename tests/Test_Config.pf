@@ -215,7 +215,7 @@ contains
       p = Parser()
       handler_cfg = p%load(EscapedTextStream( &
            & "  class: StreamHandler \n" // &
-           & "  unit: '" // trim(unitStr) // "'\n" // &
+           & "  unit: " // trim(unitStr) // "\n" // &
            & "  level: INFO"))
 
       ! Note that, level, filters, and format are added at a higher level.
@@ -269,7 +269,7 @@ contains
       p = Parser()
       handler_cfg = p%load(EscapedTextStream( &
            & " class: StreamHandler \n"// &
-           & " unit: '" // trim(unitStr) // "'\n" // &
+           & " unit: " // trim(unitStr) // "\n" // &
            & " formatter: formatterB \n" // &
            & " filters: [filterA] \n" // &
            & " level: INFO \n"))

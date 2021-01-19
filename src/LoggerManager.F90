@@ -21,6 +21,8 @@ module PFL_LoggerManager
    use PFL_AbstractLogger
    use PFL_LoggerPolyVector
    use PFL_StringAbstractLoggerPolyMap
+   use PFL_StringHandlerMap
+   use PFL_AbstractHandler
    use PFL_KeywordEnforcer
 #ifdef _LOGGER_USE_MPI
    use mpi
@@ -39,6 +41,7 @@ module PFL_LoggerManager
       private
       type (RootLogger) :: root_node
       type (LoggerMap) :: loggers
+      type (ConfigElements) :: elements 
    contains
       procedure :: get_logger_name
       procedure :: get_logger_root
@@ -343,36 +346,35 @@ contains
       type (StringUnlimitedMap), optional, intent(in) :: extra
       integer, optional, intent(in) :: comm
 
-      type (ConfigElements) :: elements
-      
       logical :: found
       type (Configuration) :: subcfg
 
       call check_schema_version(cfg)
-      call elements%set_global_communicator(comm)
+  
+      associate (elements => this%elements)
+         call elements%set_global_communicator(comm)
 
-      call cfg%get(subcfg, 'locks')
-      if (.not. subcfg%is_none()) call elements%build_locks(subcfg, extra=extra)
+         call cfg%get(subcfg, 'locks')
+         if (.not. subcfg%is_none()) call elements%build_locks(subcfg, extra=extra)
 
-      call cfg%get(subcfg, 'filters')
-      if (.not. subcfg%is_none()) call elements%build_filters(subcfg, extra=extra)
-      
-      call cfg%get(subcfg, 'formatters')
-      if (.not. subcfg%is_none()) call elements%build_formatters(subcfg, extra=extra)
+         call cfg%get(subcfg, 'filters')
+         if (.not. subcfg%is_none()) call elements%build_filters(subcfg, extra=extra)
+         
+         call cfg%get(subcfg, 'formatters')
+         if (.not. subcfg%is_none()) call elements%build_formatters(subcfg, extra=extra)
 
-      call cfg%get(subcfg, 'handlers')
-      if (.not. subcfg%is_none()) call elements%build_handlers(subcfg, extra=extra)
+         call cfg%get(subcfg, 'handlers')
+         if (.not. subcfg%is_none()) call elements%build_handlers(subcfg, extra=extra)
+      end associate
 
-      call this%build_loggers(cfg, elements, extra=extra)
-      call this%build_root_logger(cfg, elements, extra=extra)
-
+      call this%build_loggers(cfg, extra=extra)
+      call this%build_root_logger(cfg, extra=extra)
    end subroutine load_config
 
 
-   subroutine build_loggers(this, cfg, elements, unused, extra)
+   subroutine build_loggers(this, cfg, unused, extra)
       class (LoggerManager), target, intent(inout) :: this
       type (Configuration), intent(in) :: cfg
-      type (ConfigElements), intent(in) :: elements
       type (Unusable), optional, intent(in) :: unused
       type (StringUnlimitedMap), optional, intent(in) :: extra
 
@@ -396,7 +398,7 @@ contains
             name = iter%key()
             lgr => this%get_logger(name)
             call lgrs_cfg%get(lgr_cfg, name)
-            call build_logger(lgr, lgr_cfg, elements, extra=extra)
+            call build_logger(lgr, lgr_cfg, this%elements, extra=extra)
             call iter%next()
          end do
       end if
@@ -404,10 +406,9 @@ contains
    end subroutine build_loggers
 
 
-   subroutine build_root_logger(this, cfg, elements, unused, extra)
+   subroutine build_root_logger(this, cfg, unused, extra)
       class (LoggerManager), intent(inout) :: this
       type (Configuration), intent(in) :: cfg
-      type (ConfigElements), intent(in) :: elements
       type (Unusable), optional, intent(in) :: unused
       type (StringUnlimitedMap), optional, intent(in) :: extra
 
@@ -418,28 +419,33 @@ contains
 
       call cfg%get(root_cfg, 'root')
       if (.not. root_cfg%is_none()) then
-         call build_logger(this%root_node, root_cfg, elements, extra=extra)
+         call build_logger(this%root_node, root_cfg, this%elements, extra=extra)
       end if
 
    end subroutine build_root_logger
 
-   subroutine basic_config(this, unusable, filename, level, stream, force, handlers, rc)
+   subroutine basic_config(this, unusable, filename, level, stream, force, handlers, handler_refs, rc)
       use pfl_StreamHandler
       use pfl_FileHandler
+      use pfl_AbstractHandlerPtrVector
       use pfl_AbstractHandlerPolyVector
       use pfl_AbstractHandler
       class(LoggerManager), intent(inout) :: this
       class(KeywordEnforcer), optional, intent(in) :: unusable
       character(*), optional, intent(in) :: filename
       integer, optional, intent(in) :: level
-      type(StreamHandler), optional, intent(in) :: stream
+      type (StreamHandler), target, optional, intent(in) :: stream
       logical, optional, intent(in) :: force
-      type(HandlerVector), optional, intent(in) :: handlers
+      type(HandlerVector), optional, intent(inout) :: handlers
+      type(HandlerPtrVector), optional, intent(in) :: handler_refs
       integer, optional :: rc
 
-      type(HandlerVector), pointer :: existing_handlers
+      type(HandlerPtrVector), pointer :: existing_handlers
       type(HandlerVectorIterator) :: iter
+      type(HandlerPtrVectorIterator) :: iter_ptr
       class(AbstractHandler), pointer :: h
+      class(HandlerMap), pointer :: hdlMapPtr
+      character(:), allocatable :: h_name
 
       existing_handlers => this%root_node%get_handlers()
       
@@ -458,7 +464,7 @@ contains
       ! Else ...
 
       ! Check that conflicting arguments are not present
-      if (count([present(filename),present(stream),present(handlers)]) > 1) then
+      if (count([present(filename),present(stream),present(handlers), present(handler_refs)]) > 1) then
          rc = -1 ! conflicting arguments
          return
       end if
@@ -467,8 +473,13 @@ contains
          call this%root_node%set_level(level)
       end if
 
+      hdlMapPtr => this%elements%get_handlers()
+      
       if (present(filename)) then
-         call this%root_node%add_handler(FileHandler(filename))
+         h_name = get_hname()
+         call hdlMapPtr%insert(h_name, FileHandler(filename))
+         h => hdlMapPtr%at(h_name)
+         call this%root_node%add_handler(h)
       end if
 
       if (present(stream)) then
@@ -478,31 +489,50 @@ contains
       if (present(handlers)) then
          iter = handlers%begin()
          do while (iter /= handlers%end())
-            h => iter%get()
+            h_name = get_hname()
+            call hdlMapPtr%insert(h_name, iter%get())
+            h => hdlMapPtr%at(h_name)
             call this%root_node%add_handler(h)
-            call iter%next
+            call iter%next()
+         end do
+         call handlers%erase(handlers%begin(), handlers%end())
+      end if
+
+      if (present(handler_refs)) then
+         iter_ptr = handler_refs%begin()
+         do while (iter_ptr /= handler_refs%end())
+            h => iter_ptr%get()
+            call this%root_node%add_handler(h)
+            call iter_ptr%next()
          end do
       end if
 
       if (present(rc)) rc = 0 ! success
-      
+   contains
+      function get_hname() result(h_name)
+         character(:), allocatable :: h_name
+         integer :: i
+         character(4) :: n_name
+         i = hdlMapPtr%size() + 1
+         write(n_name, '(I4.4)') i
+         h_name = "__internal__from_basic__"//n_name
+      end function 
    end subroutine basic_config
 
    subroutine free(this)
       class(LoggerManager), intent(inout) :: this
       character(len=:), allocatable :: name
-      type(LoggerIterator) :: iter
-      class(AbstractLogger), pointer :: loggerPtr
+      type (HandlerMap), pointer :: hdlMapPtr
+      class (AbstractHandler), pointer :: hdlPtr
+      type (HandlerIterator) :: iter
 
-      iter =  this%loggers%begin()
-      do while (iter /= this%loggers%end())
-         name = iter%key()
-         loggerPtr=> this%loggers%at(name)
-         call loggerPtr%free()
+      hdlMapPtr => this%elements%get_handlers()
+      iter =  hdlMapPtr%begin()
+      do while (iter /= hdlMapPtr%end())
+         hdlPtr => iter%value()
+         call hdlPtr%free()
          call iter%next()
       enddo
-
-      call this%root_node%free()
 
    end subroutine free
 
