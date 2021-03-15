@@ -10,13 +10,20 @@ module PFL_AbstractLock
       procedure(lock), deferred :: release
       procedure(lock), deferred :: init
       procedure(lock), deferred :: destroy
+      procedure(is_initialized), deferred :: is_initialized
    end type AbstractLock
 
    abstract interface
-      subroutine lock(this)
+      subroutine lock(this, rc)
          import AbstractLock
          class (AbstractLock), intent(inout) :: this
+         integer, optional, intent(out) :: rc
       end subroutine lock
-   end interface
 
+      function is_initialized(this) result(init)
+         import AbstractLock
+         class (AbstractLock), intent(in) :: this
+         logical :: init
+      end function
+   end interface
 end module PFL_AbstractLock
